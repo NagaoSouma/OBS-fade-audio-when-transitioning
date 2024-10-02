@@ -26,7 +26,7 @@ local volume_after_fade_in_list = {}
 -- フェードアウト・フェードインする間隔(ミリ秒)
 -- トランジション間隔が1000ミリ秒だとすると半分の500ミリ秒になる
 -- 一応デフォルト値を持たせてるだけ
-local fade_duration = 300
+local fade_duration = 0
 
 
 -- イベントの登録と解除
@@ -50,6 +50,35 @@ function script_load(settings)
 
     obs.timer_add(get_first_scene, 100)
 
+end
+
+
+-- スクリプトの設定が変更されたときに呼ばれる関数
+function script_update(settings)
+    fade_duration = obs.obs_data_get_int(
+        settings,
+        "user_settings_fade_duration"
+    )
+    if fade_duration == nil then
+        fade_duration = 0
+    end
+end
+
+
+-- スクリプトのプロパティを定義する関数
+function script_properties()
+
+    local props = obs.obs_properties_create()
+
+    -- 整数型プロパティを追加
+    obs.obs_properties_add_int(
+        props, 
+        "user_settings_fade_duration",
+        "期間", 
+        0, 10000, 5
+    )  -- 最小0、最大1000、ステップ5
+
+    return props
 end
 
 
@@ -125,11 +154,13 @@ end
 -- イベントコールバック関数
 function on_event(event)
 
+    --[[
     if event == obs.OBS_FRONTEND_EVENT_TRANSITION_DURATION_CHANGED then
         print("-----OBS_FRONTEND_EVENT_TRANSITION_DURATION_CHANGED-----")
         fade_duration = obs.obs_frontend_get_transition_duration() / 2.5
         print("フェードアウトする間隔: " .. fade_duration .. "ミリ秒")
     end
+    ]]
 
 end
 
