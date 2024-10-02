@@ -189,7 +189,7 @@ function get_audio_list(scene_name)
     -- メモリを解放
     obs.obs_scene_release(scene)
     obs.sceneitem_list_release(scene_items)
-    
+
     return media_sources
 
 end
@@ -240,7 +240,7 @@ function fade_out_audio()
         local current_volume = obs.obs_source_get_volume(audio)
 
         print("音量(前): " .. current_volume)
-    
+
         current_volume = math.max(current_volume - fade_out_step, 0)
         obs.obs_source_set_volume(audio, current_volume)
 
@@ -271,12 +271,12 @@ function fade_out_audio()
         print("フェードアウト終了")
         obs.timer_remove(fade_out_audio)
     end
-    
+
 end
 
 
 function start_fade_in(audio_list)
-    
+
     fade_in_audio_list = audio_list
 
     for i = #fade_in_audio_list, 1, -1 do
@@ -356,5 +356,5 @@ function fade_in_audio()
         print("フェードイン終了")
         obs.timer_remove(fade_in_audio)
     end
-    
+
 end
