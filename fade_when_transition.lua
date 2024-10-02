@@ -26,7 +26,7 @@ local volume_after_fade_in_list = {}
 -- フェードアウト・フェードインする間隔(ミリ秒)
 -- トランジション間隔が1000ミリ秒だとすると半分の500ミリ秒になる
 -- 一応デフォルト値を持たせてるだけ
-local fade_duration = 500
+local fade_duration = 300
 
 
 -- イベントの登録と解除
@@ -45,9 +45,9 @@ function script_load(settings)
             "transition_start",
             on_transition_start
         )
-       
+
     end
-    
+
     obs.timer_add(get_first_scene, 100)
 
 end
@@ -109,12 +109,16 @@ end
 
 function on_transition_stop(source)
     print("on_transition_stop")
+
     -- メモリを解放したいんだが遷移しすぎるとクラッシュする
-    --[[
     for _, audio in ipairs(fade_out_audio_list) do
         obs.obs_source_release(audio)
     end
-    ]]
+
+    for _, audio in ipairs(fade_in_audio_list) do
+        obs.obs_source_release(audio)
+    end
+
 end
 
 
@@ -123,7 +127,7 @@ function on_event(event)
 
     if event == obs.OBS_FRONTEND_EVENT_TRANSITION_DURATION_CHANGED then
         print("-----OBS_FRONTEND_EVENT_TRANSITION_DURATION_CHANGED-----")
-        fade_duration = obs.obs_frontend_get_transition_duration() / 2
+        fade_duration = obs.obs_frontend_get_transition_duration() / 2.5
         print("フェードアウトする間隔: " .. fade_duration .. "ミリ秒")
     end
 
