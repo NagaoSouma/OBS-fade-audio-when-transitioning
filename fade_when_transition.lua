@@ -24,9 +24,12 @@ local volume_after_fade_in_list = {}
 
 
 -- フェードアウト・フェードインする間隔(ミリ秒)
--- トランジション間隔が1000ミリ秒だとすると半分の500ミリ秒になる
--- 一応デフォルト値を持たせてるだけ
 local fade_duration = 0
+
+
+function script_description()
+    return "シーン遷移時に音声ソースのフェードイン・フェードアウトを実行します。フェードの長さを変えられます。"
+end
 
 
 -- イベントの登録と解除
@@ -74,8 +77,10 @@ function script_properties()
     obs.obs_properties_add_int(
         props, 
         "user_settings_fade_duration",
-        "期間", 
-        0, 10000, 5
+        "フェード(ミリ秒)",
+        0,
+        10000,
+        5
     )  -- 最小0、最大1000、ステップ5
 
     return props
@@ -157,7 +162,6 @@ end
 
 -- イベントコールバック関数
 function on_event(event)
-
     --[[
     if event == obs.OBS_FRONTEND_EVENT_TRANSITION_DURATION_CHANGED then
         print("-----OBS_FRONTEND_EVENT_TRANSITION_DURATION_CHANGED-----")
@@ -165,7 +169,6 @@ function on_event(event)
         print("フェードアウトする間隔: " .. fade_duration .. "ミリ秒")
     end
     ]]
-
 end
 
 
@@ -250,26 +253,21 @@ function start_fade_out(audio_list)
         -- フェードインが完了していたら
         if volume_after_fade_in_list[audio_name] == nil then
 
-            local target_volume = 0
+            local target_volume
 
             if volume_before_fade_out_list[audio_name] then
                 -- 保存してた音量を目標値にする
                 target_volume = volume_before_fade_out_list[audio_name]
-
-                -- フェードアウトのステップを保存
-                local fade_out_step = target_volume / (fade_duration / 100)
-                fade_out_step_list[audio_name] = fade_out_step
             else
                 -- 元々の音量を保存しておく
                 -- トランジション完了後にフェードアウトしたオーディオメディアの元々の音量に戻す
-                local current_volume = obs.obs_source_get_volume(audio)
-                volume_before_fade_out_list[audio_name] = current_volume
-
-                -- フェードアウトのステップを保存
-                local fade_out_step = current_volume / (fade_duration / 100)
-                fade_out_step_list[audio_name] = fade_out_step
-
+                target_volume = obs.obs_source_get_volume(audio)
+                volume_before_fade_out_list[audio_name] = target_volume
             end
+
+            -- フェードアウトのステップを保存
+            local fade_out_step = target_volume / (fade_duration / 100)
+            fade_out_step_list[audio_name] = fade_out_step
 
         else
             -- フェードアウトしなくていいなら
@@ -355,29 +353,25 @@ function start_fade_in(audio_list)
         local audio = fade_in_audio_list[i]
         local audio_name = obs.obs_source_get_name(audio)
 
-        -- それぞれフェードが完了していたら
+        -- フェードアウトが完了していたら
         if volume_before_fade_out_list[audio_name] == nil then
+
+            local target_volume
 
             -- フェードインの途中だったらvolume_after_fade_in_listを更新しない
             if volume_after_fade_in_list[audio_name] then
                 -- 保存されていた音量を目標値にする
-               local target_volume = volume_after_fade_in_list[audio_name]
-
-               -- フェードインのステップを保存
-               local fade_in_step = target_volume / (fade_duration / 100)
-               fade_in_step_list[audio_name] = fade_in_step
-
+                target_volume = volume_after_fade_in_list[audio_name]
             else
                 -- 元々の音量を保存しておく
                 -- トランジション完了後にフェードインしたオーディオメディアの元々の音量に戻す
-                local current_volume = obs.obs_source_get_volume(audio)
-                volume_after_fade_in_list[audio_name] = current_volume
-
-                -- フェードインのステップを保存
-                local fade_in_step = current_volume / (fade_duration / 100)
-                fade_in_step_list[audio_name] = fade_in_step
-
+                target_volume = obs.obs_source_get_volume(audio)
+                volume_after_fade_in_list[audio_name] = target_volume
             end
+
+            -- フェードインのステップを保存
+            local fade_in_step = target_volume / (fade_duration / 100)
+            fade_in_step_list[audio_name] = fade_in_step
 
             -- その後音量を0にしておく
             obs.obs_source_set_volume(audio, 0)
