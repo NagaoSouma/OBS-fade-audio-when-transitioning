@@ -102,6 +102,7 @@ function get_first_scene()
     else
         print("開始シーンをロードできませんでした")
     end
+
 end
 
 
@@ -123,6 +124,8 @@ function on_transition_start(source)
     local previous_audio_list = get_audio_list(previous_scene_name)
     start_fade_out(previous_audio_list)
 
+    print("")
+
     -- 現在のシーンのメディアソースをフェードイン
     local current_audio_list = get_audio_list(current_scene_name)
     start_fade_in(current_audio_list)
@@ -137,9 +140,10 @@ end
 
 
 function on_transition_stop(source)
+
     print("on_transition_stop")
 
-    -- メモリを解放したいんだが遷移しすぎるとクラッシュする
+    -- メモリを解放
     for _, audio in ipairs(fade_out_audio_list) do
         obs.obs_source_release(audio)
     end
@@ -233,28 +237,54 @@ end
 -- フェードアウト開始の関数
 function start_fade_out(audio_list)
 
+    -- 既存のフェードアウト処理をキャンセル
+    obs.timer_remove(fade_out_audio)
+
     fade_out_audio_list = audio_list
 
     for i = #fade_out_audio_list, 1, -1 do
-        local audio = fade_out_audio_list[i]
-        -- フェードアウトのステップ
-        local fade_out_step = obs.obs_source_get_volume(audio) / (fade_duration / 100)
-        table.insert(fade_out_step_list, fade_out_step)
 
-        -- 元々の音量を保存しておく
-        -- トランジション完了後にフェードアウトしたオーディオメディアの元々の音量に戻す
-        local volume = obs.obs_source_get_volume(audio)
-        table.insert(volume_before_fade_out_list, volume)
+        local audio = fade_out_audio_list[i]
+        local audio_name = obs.obs_source_get_name(audio)
+
+        -- フェードインが完了していたら
+        if volume_after_fade_in_list[audio_name] == nil then
+
+            local target_volume = 0
+
+            if volume_before_fade_out_list[audio_name] then
+                -- 保存してた音量を目標値にする
+                target_volume = volume_before_fade_out_list[audio_name]
+
+                -- フェードアウトのステップを保存
+                local fade_out_step = target_volume / (fade_duration / 100)
+                fade_out_step_list[audio_name] = fade_out_step
+            else
+                -- 元々の音量を保存しておく
+                -- トランジション完了後にフェードアウトしたオーディオメディアの元々の音量に戻す
+                local current_volume = obs.obs_source_get_volume(audio)
+                volume_before_fade_out_list[audio_name] = current_volume
+
+                -- フェードアウトのステップを保存
+                local fade_out_step = current_volume / (fade_duration / 100)
+                fade_out_step_list[audio_name] = fade_out_step
+
+            end
+
+        else
+            -- フェードアウトしなくていいなら
+            table.remove(fade_out_audio_list, i)
+        end
     end
 
     print("[フェードアウトのステップ]")
-    for _, fade_out_step in ipairs(fade_out_step_list) do
-        print("  " .. fade_out_step)
+    for key, value in pairs(fade_out_step_list) do
+        print("  " .. key .. " :" .. value .. "ms")
     end
 
     print("[フェードアウト前の音量]")
-    for _, volume in ipairs(volume_before_fade_out_list) do
-        print("  " .. volume)
+    for key, value in pairs(volume_before_fade_out_list) do
+        print("  " .. key .. " :" .. value .. "ms")
     end
 
     -- 100msごとにコールバックを実行
@@ -270,7 +300,9 @@ function fade_out_audio()
     for i = #fade_out_audio_list, 1, -1 do
 
         local audio = fade_out_audio_list[i]
-        local fade_out_step = fade_out_step_list[i]
+        local audio_name = obs.obs_source_get_name(audio)
+
+        local fade_out_step = fade_out_step_list[audio_name]
 
         local current_volume = obs.obs_source_get_volume(audio)
 
@@ -288,14 +320,15 @@ function fade_out_audio()
 
             -- オーディオを停止して元の音量に戻す
             obs.obs_source_media_play_pause(audio, true)
-            obs.obs_source_set_volume(audio, volume_before_fade_out_list[i])
+
+            obs.obs_source_set_volume(
+                audio,
+                volume_before_fade_out_list[audio_name]
+            )
 
             table.remove(fade_out_audio_list, i)
-            table.remove(fade_out_step_list, i)
-            table.remove(volume_before_fade_out_list, i)
-
-            -- メモリを解放
-            --obs.obs_source_release(audio)
+            fade_out_step_list[audio_name] = nil
+            volume_before_fade_out_list[audio_name] = nil
 
         end
 
@@ -312,37 +345,60 @@ end
 
 function start_fade_in(audio_list)
 
+    -- 既存のフェードイン処理をキャンセル
+    obs.timer_remove(fade_in_audio)
+
     fade_in_audio_list = audio_list
 
     for i = #fade_in_audio_list, 1, -1 do
 
         local audio = fade_in_audio_list[i]
+        local audio_name = obs.obs_source_get_name(audio)
 
-        -- 元々の音量を保存しておく
-        -- トランジション完了後にフェードiインしたオーディオメディアの元々の音量に戻す
-        local volume = obs.obs_source_get_volume(audio)
-        table.insert(volume_after_fade_in_list, volume)
+        -- それぞれフェードが完了していたら
+        if volume_before_fade_out_list[audio_name] == nil then
 
-        -- オーディオメディアを再生する
-        obs.obs_source_media_restart(audio)
+            -- フェードインの途中だったらvolume_after_fade_in_listを更新しない
+            if volume_after_fade_in_list[audio_name] then
+                -- 保存されていた音量を目標値にする
+               local target_volume = volume_after_fade_in_list[audio_name]
 
-        -- フェードインのステップ
-        local fade_in_step = volume / (fade_duration / 100)
-        table.insert(fade_in_step_list, fade_in_step)
+               -- フェードインのステップを保存
+               local fade_in_step = target_volume / (fade_duration / 100)
+               fade_in_step_list[audio_name] = fade_in_step
 
-        -- その後音量を0にしておく
-        obs.obs_source_set_volume(audio, 0)
+            else
+                -- 元々の音量を保存しておく
+                -- トランジション完了後にフェードインしたオーディオメディアの元々の音量に戻す
+                local current_volume = obs.obs_source_get_volume(audio)
+                volume_after_fade_in_list[audio_name] = current_volume
+
+                -- フェードインのステップを保存
+                local fade_in_step = current_volume / (fade_duration / 100)
+                fade_in_step_list[audio_name] = fade_in_step
+
+            end
+
+            -- その後音量を0にしておく
+            obs.obs_source_set_volume(audio, 0)
+
+            -- オーディオメディアを再生する
+            obs.obs_source_media_restart(audio)
+            
+        else
+            table.remove(fade_in_audio_list, i)
+        end
 
     end
 
     print("[フェードインのステップ]")
-    for _, fade_in_step in ipairs(fade_in_step_list) do
-        print("  " .. fade_in_step)
+    for key, value in pairs(fade_in_step_list) do
+        print("  " .. key .. " :" .. value .. "ms")
     end
 
-    print("[フェードイン前の音量]")
-    for _, volume in ipairs(volume_after_fade_in_list) do
-        print("  " .. volume)
+    print("[フェードアウト前の音量]")
+    for key, value in pairs(volume_after_fade_in_list) do
+        print("  " .. key .. " :" .. value .. "ms")
     end
 
     -- 100msごとにコールバックを実行
@@ -358,8 +414,11 @@ function fade_in_audio()
     for i = #fade_in_audio_list, 1, -1 do
 
         local audio = fade_in_audio_list[i]
-        local fade_in_step = fade_in_step_list[i]
-        local target_volume = volume_after_fade_in_list[i]
+        local audio_name = obs.obs_source_get_name(audio)
+
+        local fade_in_step = fade_in_step_list[audio_name]
+
+        local target_volume = volume_after_fade_in_list[audio_name]
 
         local current_volume = obs.obs_source_get_volume(audio)
 
@@ -370,17 +429,14 @@ function fade_in_audio()
 
         print("音量(後): " .. current_volume)
 
-        -- 音量が0になったらリストから削除  
+        -- 音量が目標値 になったらリストから削除  
         if current_volume == target_volume then
 
             print("音量が目標値になりました")
 
             table.remove(fade_in_audio_list, i)
-            table.remove(fade_in_step_list, i)
-            table.remove(volume_after_fade_in_list, i)
-
-            -- メモリを解放
-            --obs.obs_source_release(audio)
+            fade_in_step_list[audio_name] = nil
+            volume_after_fade_in_list[audio_name] = nil
 
         end
 
