@@ -3,6 +3,13 @@ obs = obslua
 -- 前のシーン
 local previous_scene_name = nil
 
+-- 全てのオーディオメディアのリスト
+-- トランジションの開始時に遷移前と遷移後のオーディオメディアを集めてトランジション終了後にソースをまとめて解放する。
+-- トランジション時に同じ参照のメディアソースがある場合、そのメディアソースがフェードしないようにするため、
+-- fade_out.audio_list と　fade_in.audio_list から共通のメディアソースを削除する必要があるので
+-- この変数にまとめておく
+local all_audio_list = {}
+
 local fade_out = {
     -- メディアソースのリスト
     audio_list = {},
@@ -22,14 +29,20 @@ local fade_in = {
     step_list = {},
     -- フェードする前の音量のリスト
     -- audio_nameがkey
-
     volume_list = {}
 }
 
 -- フェードアウト・フェードインする間隔(ミリ秒)
 -- ユーザーが設定できる
--- そのうちリストで持ってトランジション毎に設定できるようにしたい
 local fade_duration = 0
+
+-- フェードの単位
+local FADE_UNIT = 100
+
+-- シグナルハンドラの接続を管理する変数
+-- この変数には、obs.signal_handler_connectによって接続されたシグナルハンドラの情報が格納される
+-- スクリプトがアンロードされる際に、適切に切断するために使用される
+local signal_handler = nil
 
 
 -- audioをaudio_nameに変換する
@@ -39,36 +52,30 @@ end
 
 
 -- audioのリストのログを出力
-local log_audio_list = function (audio_list)
-    for_each_generic(
-        audio_list,
-        function (_, audio)
-            local audio_name = obs.obs_source_get_name(audio)
-            print("  ソース名: " .. audio_name)
-        end
-    )
+local log_audio_list = function (title, audio_list)
+    print(title)
+    for _, audio in ipairs(audio_list) do
+        local audio_name = obs.obs_source_get_name(audio)
+        print("  ソース名: " .. audio_name)
+    end
 end
 
 
 -- フェードのステップのリストのログを出力
-local log_step_list = function (step_list)
-    for_each_generic(
-        step_list,
-        function (audio_name, millisconeds)
-            print("  " .. audio_name .. " :" .. millisconeds .. "ms")
-        end
-    )
+local log_step_list = function (title, step_list)
+    print(title)
+    for audio_name, step in pairs(step_list) do
+        print("  " .. audio_name .. " :" .. step .. "ms")
+    end
 end
 
 
 -- 音量にリストのログを出力
-local log_volume_list = function (volume_list)
-    for_each_generic(
-        volume_list,
-        function (audio_name, volume)
-            print("  " .. audio_name .. " :" .. volume)
-        end
-    )
+local log_volume_list = function (title, volume_list)
+    print(title)
+    for audio_name, volume in pairs(volume_list) do
+        print("  " .. audio_name .. " :" .. volume)
+    end
 end
 
 
@@ -86,7 +93,7 @@ function script_load(_)
 
     for _, transition_source in ipairs(transition_list) do
 
-        local signal_handler = obs.obs_source_get_signal_handler(transition_source)
+        signal_handler = obs.obs_source_get_signal_handler(transition_source)
 
         obs.signal_handler_connect(
             signal_handler,
@@ -97,17 +104,37 @@ function script_load(_)
     end
 
     -- 100ms毎に開始シーンの取得を試みる
-    obs.timer_add(get_first_scene, 100)
+    obs.timer_add(init_first_scene, 100)
+
+    -- メモリを解放
+    obs.source_list_release(transition_list)
+
+end
+
+
+function script_unload()
+
+    print("-----script_unload-----")
+
+    -- リソースを解放
+    if signal_handler then
+        obs.signal_handler_disconnect(signal_handler)
+        signal_handler = nil
+    end
 
 end
 
 
 -- スクリプトの設定が変更されたときに呼ばれる関数
 function script_update(settings)
+
+    print("-----script_update-----")
+
     fade_duration = obs.obs_data_get_int(
         settings,
         "fade_duration"
     )
+
 end
 
 
@@ -116,27 +143,27 @@ function script_properties()
 
     local props = obs.obs_properties_create()
 
-    -- フェードの設定
+    -- フェード時間
     obs.obs_properties_add_int(
-        props,
+        props, 
         "fade_duration",
-        "フェード(ミリ秒)",
-        0, -- 最小
-        10000, -- 最大
-        5 -- ステップ5
+        "フェード時間 (ミリ秒)",
+        0, -- 最小値
+        10000, -- 最大値 
+        10 -- ステップ
     )
 
     return props
 end
 
 
-function get_first_scene()
+function init_first_scene()
 
-    print("get_first_scene")
+    print("init_first_scene")
 
-    -- 既に初期化されていたら返す
+    -- 既に初期化されていたらタイマーを削除して返す
     if previous_scene_name then
-        obs.timer_remove(get_first_scene)
+        obs.timer_remove(init_first_scene)
         return
     end
 
@@ -161,11 +188,15 @@ function on_transition_start(_)
     -- 現在のシーンを取得
     local current_scene = obs.obs_frontend_get_current_scene()
 
-    if current_scene == nil then return end
+    if current_scene == nil then
+        return
+    end
 
     local current_scene_name = obs.obs_source_get_name(current_scene)
 
-    if current_scene_name == previous_scene_name then return end
+    if current_scene_name == previous_scene_name then
+        return
+    end
 
     print("トランジション: " .. previous_scene_name .. " -> " .. current_scene_name)
 
@@ -173,34 +204,34 @@ function on_transition_start(_)
     local previous_audio_list = get_audio_list(previous_scene_name)
     local current_audio_list = get_audio_list(current_scene_name)
 
+    -- オーディオメディアのリストを結合して後でまとめて解放する
+    all_audio_list = merge_tables(previous_audio_list, current_audio_list)
+
     -- それぞれのリストに共通の要素を削除する
     -- 削除することでシーン間で同じ参照を持つオーディオメディアをフェードしない様にする
-    local correct_preivous_audio_list = subtract_tables(
+    fade_out.audio_list = subtract_tables(
         previous_audio_list,
         current_audio_list,
         audio_to_audio_name
     )
 
-    local correct_current_audio_list = subtract_tables(
+    fade_in.audio_list = subtract_tables(
         current_audio_list,
         previous_audio_list,
         audio_to_audio_name
     )
 
-    print("[correct_preivous_audio_list]")
-    log_audio_list(correct_current_audio_list)
-
-    print("[correct_current_audio_list]")
-    log_audio_list(correct_preivous_audio_list)
+    log_audio_list("[correct_preivous_audio_list]", fade_out.audio_list)
+    log_audio_list("[correct_current_audio_list]", fade_in.audio_list)
 
     -- 前のシーンのメディアソースをフェードアウト
-    if correct_preivous_audio_list and #correct_preivous_audio_list > 0 then
-        start_fade_out(correct_preivous_audio_list) 
+    if fade_out.audio_list and #fade_out.audio_list > 0 then
+        start_fade_out()
     end
 
     -- 現在のシーンのメディアソースをフェードイン
-    if correct_current_audio_list and #correct_current_audio_list > 0 then
-        start_fade_in(correct_current_audio_list)
+    if fade_in.audio_list and #fade_in.audio_list > 0 then
+        start_fade_in()
     end
 
     -- 現在のシーン名を次回用に保存
@@ -217,11 +248,7 @@ function on_transition_stop(_)
     print("on_transition_stop")
 
     -- メモリを解放
-    for _, audio in ipairs(fade_out.audio_list) do
-        obs.obs_source_release(audio)
-    end
-
-    for _, audio in ipairs(fade_in.audio_list) do
+    for _, audio in pairs(all_audio_list) do
         obs.obs_source_release(audio)
     end
 
@@ -292,13 +319,10 @@ end
 
 
 -- フェードアウト開始の関数
-function start_fade_out(audio_list)
+function start_fade_out()
 
     -- 既存のフェードアウト処理をキャンセル
     obs.timer_remove(fade_out_audio)
-
-    --fade_out_audio_list = audio_list
-    fade_out.audio_list = audio_list
 
     for i = #fade_out.audio_list, 1, -1 do
 
@@ -321,7 +345,7 @@ function start_fade_out(audio_list)
             end
 
             -- フェードアウトのステップを保存
-            local fade_out_step = target_volume / (fade_duration / 100)
+            local fade_out_step = target_volume / (fade_duration / FADE_UNIT)
             fade_out.step_list[audio_name] = fade_out_step
 
         else
@@ -330,14 +354,11 @@ function start_fade_out(audio_list)
         end
     end
 
-    print("[フェードアウトのステップ]")
-    log_step_list(fade_out.step_list)
-
-    print("[フェードアウト前の音量]")
-    log_volume_list(fade_out.volume_list)
+    log_step_list("[フェードアウトのステップ]", fade_out.step_list)
+    log_volume_list("[フェードアウト前の音量]", fade_out.volume_list)
 
     -- 100msごとにコールバックを実行
-    obs.timer_add(fade_out_audio, 100)
+    obs.timer_add(fade_out_audio, FADE_UNIT)
 
 end
 
@@ -392,12 +413,10 @@ function fade_out_audio()
 end
 
 
-function start_fade_in(audio_list)
+function start_fade_in()
 
     -- 既存のフェードイン処理をキャンセル
     obs.timer_remove(fade_in_audio)
-
-    fade_in.audio_list = audio_list
 
     for i = #fade_in.audio_list, 1, -1 do
 
@@ -421,7 +440,7 @@ function start_fade_in(audio_list)
             end
 
             -- フェードインのステップを保存
-            local fade_in_step = target_volume / (fade_duration / 100)
+            local fade_in_step = target_volume / (fade_duration / FADE_UNIT)
             fade_in.step_list[audio_name] = fade_in_step
 
             -- その後音量を0にしておく
@@ -436,14 +455,11 @@ function start_fade_in(audio_list)
 
     end
 
-    print("[フェードインのステップ]")
-    log_step_list(fade_in.step_list)
-
-    print("[フェードアウト前の音量]")
-    log_volume_list(fade_in.volume_list)
+    log_step_list("[フェードインのステップ]", fade_in.step_list)
+    log_volume_list("[フェードアウト前の音量]", fade_in.volume_list)
 
     -- 100msごとにコールバックを実行
-    obs.timer_add(fade_in_audio, 100)
+    obs.timer_add(fade_in_audio, FADE_UNIT)
 
 end
 
@@ -491,6 +507,23 @@ function fade_in_audio()
 end
 
 
+function merge_tables(t1, t2)
+
+    local merged = {}
+
+    for _, v in ipairs(t1) do
+        table.insert(merged, v)
+    end
+
+    for _, v in ipairs(t2) do
+        table.insert(merged, v)
+    end
+
+    return merged
+
+end
+
+
 -- t1からt2の要素を引いて返す
 -- 比較用の無名関数を引数として受け取る
 function subtract_tables(t1, t2, comparator)
@@ -515,48 +548,3 @@ function subtract_tables(t1, t2, comparator)
 
 end
 
-
--- リストまたはテーブルの全ての要素に関数を適用する汎用関数
-function for_each_generic(tbl, func)
-    -- 順序付き（数値インデックス）の場合は ipairs を使用
-    if #tbl > 0 then
-        for index, item in ipairs(tbl) do
-            func(index, item)
-        end
-    else
-        -- キーと値のペアの場合は pairs を使用
-        for key, value in pairs(tbl) do
-            func(key, value)
-        end
-    end
-end
-
-
-
--- クラス定義
-FadeOut = {}
-FadeOut.__index = FadeOut
-
--- コンストラクタ
-function FadeOut:new()
-    local instance = {
-        data_list = {}
-    }
-    setmetatable(instance, FadeOut)
-    return instance
-end
-
-
-function FadeOut:add_data(audio, step, volume)
-    local data = {
-        audio = audio,
-        step = step,
-        volume = volume
-    }
-    table.insert(self.data_list, data)
-end
-
-
-function FadeOut:get_data()
-    return self.data_list
-end
