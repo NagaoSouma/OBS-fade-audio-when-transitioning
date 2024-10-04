@@ -6,7 +6,7 @@ local previous_scene_name = nil
 -- 全てのオーディオメディアのリスト
 -- トランジションの開始時に遷移前と遷移後のオーディオメディアを集めてトランジション終了後にソースをまとめて解放する。
 -- トランジション時に同じ参照のメディアソースがある場合、そのメディアソースがフェードしないようにするため、
--- fade_out.audio_list と　fade_in.audio_list から共通のメディアソースを削除する必要があるので
+-- fade_out.audio_list と　fade_in.audio_list から共通のメディアソースを削除するために必要
 -- この変数にまとめておく
 local all_audio_list = {}
 
