@@ -291,9 +291,6 @@ function get_audio_list(scene_name)
         return media_sources
     end
 
-    -- シーンアイテムを1つずつ確認
-    print("[" .. scene_name .. "内のソースアイテム]")
-    
     for _, scene_item in ipairs(scene_items) do
 
         local source = obs.obs_sceneitem_get_source(scene_item)
