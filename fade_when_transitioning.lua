@@ -40,9 +40,9 @@ local fade_duration = 0
 local FADE_UNIT = 100
 
 -- シグナルハンドラの接続を管理する変数
--- この変数には、obs.signal_handler_connectによって接続されたシグナルハンドラの情報が格納される
+-- obs.signal_handler_connectによって接続されたシグナルハンドラの情報が格納される
 -- スクリプトがアンロードされる際に、適切に切断するために使用される
-local signal_handler = nil
+local signal_handler_list = {}
 
 
 -- audioをaudio_nameに変換する
@@ -93,13 +93,15 @@ function script_load(_)
 
     for _, transition_source in ipairs(transition_list) do
 
-        signal_handler = obs.obs_source_get_signal_handler(transition_source)
+        local signal_handler = obs.obs_source_get_signal_handler(transition_source)
 
         obs.signal_handler_connect(
             signal_handler,
             "transition_start",
             on_transition_start
         )
+
+        table.insert(signal_handler_list, signal_handler)
 
     end
 
@@ -116,10 +118,9 @@ function script_unload()
 
     print("-----script_unload-----")
 
-    -- リソースを解放
-    if signal_handler then
+    -- シグナルハンドラを解除
+    for _, signal_handler in ipairs(signal_handler_list) do
         obs.signal_handler_disconnect(signal_handler)
-        signal_handler = nil
     end
 
 end
@@ -198,7 +199,14 @@ function on_transition_start(_)
         return
     end
 
-    print("トランジション: " .. previous_scene_name .. " -> " .. current_scene_name)
+    -- 現在のトランジションを取得
+    local current_trannsition = obs.obs_frontend_get_current_transition()
+    local current_trannsition_name = obs.obs_source_get_name(current_trannsition)
+
+    -- メモリを解放
+    obs.obs_source_release(current_trannsition)
+
+    print("トランジション: " .. previous_scene_name .. " -> " .. current_scene_name .. "(" .. current_trannsition_name .. ")")
 
     -- 各々のオーディオメディアのリストを取得
     local previous_audio_list = get_audio_list(previous_scene_name)
