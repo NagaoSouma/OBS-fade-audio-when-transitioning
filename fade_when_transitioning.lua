@@ -6,7 +6,7 @@ local previous_scene_name = nil
 -- 全てのオーディオメディアのリスト
 -- トランジションの開始時に遷移前と遷移後のオーディオメディアを集めてトランジション終了後にソースをまとめて解放する。
 -- トランジション時に同じ参照のメディアソースがある場合、そのメディアソースがフェードしないようにするため、
--- fade_out.audio_list と　fade_in.audio_list から共通のメディアソースを削除するために必要
+-- fade_out.audio_list と　fade_in.audio_list から共通のメディアソースを削除する必要があるので
 -- この変数にまとめておく
 local all_audio_list = {}
 
@@ -32,17 +32,29 @@ local fade_in = {
     volume_list = {}
 }
 
--- フェードアウト・フェードインする間隔(ミリ秒)
+-- 現在のフェード時間
+-- ユーザーが設定したfade_duration_tableと照らし合わせて変化する
+local current_fade_duration = 0
+
+-- フェードアウト・フェードインする間隔(ミリ秒)のテーブル
 -- ユーザーが設定できる
-local fade_duration = 0
+-- キーはトランジション名
+local fade_duration_table = {}
 
 -- フェードの単位
 local FADE_UNIT = 100
+
+-- トランジション名のリスト
+local transition_name_list = {}
 
 -- シグナルハンドラの接続を管理する変数
 -- obs.signal_handler_connectによって接続されたシグナルハンドラの情報が格納される
 -- スクリプトがアンロードされる際に、適切に切断するために使用される
 local signal_handler_list = {}
+
+-- グローバルなsettings
+-- メモリリークが心配
+local global_settings = nil
 
 
 -- audioをaudio_nameに変換する
@@ -65,7 +77,7 @@ end
 local log_step_list = function (title, step_list)
     print(title)
     for audio_name, step in pairs(step_list) do
-        print("  " .. audio_name .. " :" .. step .. "ms")
+        print("  " .. audio_name .. " :" .. step)
     end
 end
 
@@ -80,20 +92,52 @@ end
 
 
 function script_description()
-    return "シーン遷移時に音声ソースのフェードイン・フェードアウトを実行します。フェードの長さを変えられます。"
+    return "シーン遷移時に音声ソースのフェードイン・フェードアウトを実行します。\n\n" ..
+           "トランジション毎にフェードの長さを変えられます。\n\n" ..
+           "トランジションを増やしたらスクリプトを更新するとリストにトランジションが追加されます。"
 end
 
 
 -- イベントの登録と解除
-function script_load(_)
+-- 起動時はソースが全てロードされる前にこの関数が呼び出されてしまうので、
+-- on_eventのOBS_FRONTEND_EVENT_FINISHED_LOADINGを検知して初期化する。
+-- 逆にスクリプトを初めてロードしたり、リロードされた時はon_eventは発火しないのでこの関数で初期化する。
+-- スクリプトがロード・リロードしている頃にはソースはロードされているので正しく初期化できる。
+function script_load(settings)
 
     print("-----script_load-----")
 
+    global_settings = settings
+
+    -- 初期化処理をする
+    init()
+
+    -- イベントのコールバックを登録
+    obs.obs_frontend_add_event_callback(on_event)
+
+end
+
+
+function init()
+
+    print("-----init-----")
+
+    -- previous_scene_nameを更新
+    init_previous_scene_name()
+
+    -- transition_name_listを更新
+    update_transition_name_list()
+
+    -- fade_duration_tableを更新
+    update_fade_duration_table(global_settings)
+
+    -- トランジションが開始したら発火するコールバックを登録
     local transition_list =  obs.obs_frontend_get_transitions()
 
     for _, transition_source in ipairs(transition_list) do
 
         local signal_handler = obs.obs_source_get_signal_handler(transition_source)
+        table.insert(signal_handler_list, signal_handler)
 
         obs.signal_handler_connect(
             signal_handler,
@@ -101,12 +145,7 @@ function script_load(_)
             on_transition_start
         )
 
-        table.insert(signal_handler_list, signal_handler)
-
     end
-
-    -- 100ms毎に開始シーンの取得を試みる
-    obs.timer_add(init_first_scene, 100)
 
     -- メモリを解放
     obs.source_list_release(transition_list)
@@ -123,18 +162,53 @@ function script_unload()
         obs.signal_handler_disconnect(signal_handler)
     end
 
+    -- イベントのコールバックを削除
+    obs.obs_frontend_remove_event_callback(on_event)
+    
 end
 
 
 -- スクリプトの設定が変更されたときに呼ばれる関数
 function script_update(settings)
-
     print("-----script_update-----")
+    update_fade_duration_table(settings)
+end
 
-    fade_duration = obs.obs_data_get_int(
-        settings,
-        "fade_duration"
-    )
+
+function update_transition_name_list()
+
+    print("-----update_transition_list-----")
+
+    -- transition_name_listを初期化
+    transition_name_list = {}
+
+    local transition_list =  obs.obs_frontend_get_transitions()
+
+    for _, transition_source in ipairs(transition_list) do
+        local transition_name = obs.obs_source_get_name(transition_source)
+        table.insert(transition_name_list, transition_name)
+        print("  " .. transition_name)
+    end
+
+    -- メモリを解放
+    obs.source_list_release(transition_list)
+
+end
+
+
+function update_fade_duration_table(settings)
+
+    for _, transition_name in ipairs(transition_name_list) do
+        fade_duration_table[transition_name] = obs.obs_data_get_int(
+            settings,
+            "fade_duration_" .. transition_name
+        )
+    end
+
+    print("[fade_duration_table]")
+    for transition_name, fade in pairs(fade_duration_table) do
+        print("  " .. transition_name .. ":" .. fade .. "ms")
+    end
 
 end
 
@@ -142,32 +216,70 @@ end
 -- スクリプトのプロパティを定義する関数
 function script_properties()
 
+    print("-----script_properties-----")
+
     local props = obs.obs_properties_create()
 
-    -- フェード時間
-    obs.obs_properties_add_int(
-        props, 
-        "fade_duration",
-        "フェード時間 (ミリ秒)",
-        0, -- 最小値
-        10000, -- 最大値 
-        10 -- ステップ
-    )
+    -- transition_name_listを初期化しリストのUIを作成
+    transition_name_list = {}
+
+    local transition_list =  obs.obs_frontend_get_transitions()
+
+    for _, transition_source in ipairs(transition_list) do
+        local transition_name = obs.obs_source_get_name(transition_source)
+        table.insert(transition_name_list, transition_name)
+        print("  " .. transition_name)
+    end
+
+    -- メモリを解放
+    obs.source_list_release(transition_list)
+
+    for _, transition_name in pairs(transition_name_list) do
+
+        -- トランジションごとにプロパティを追加
+        local group = obs.obs_properties_create()
+
+        -- フェード時間
+        obs.obs_properties_add_int(
+            group,
+            "fade_duration_" .. transition_name,
+            "フェード時間 (ミリ秒)",
+            0, -- 最小値
+            10000, -- 最大値
+            10 -- ステップ
+        )
+
+        -- 追加されたトランジショングループをプロパティに追加
+        obs.obs_properties_add_group(
+            props,
+            "transition_group_" .. transition_name,
+            transition_name,
+            obs.OBS_GROUP_NORMAL,
+            group
+        )
+
+    end
 
     return props
 end
 
 
-function init_first_scene()
+function init_previous_scene_name()
 
     print("init_first_scene")
 
     -- 既に初期化されていたらタイマーを削除して返す
     if previous_scene_name then
-        obs.timer_remove(init_first_scene)
         return
     end
 
+    update_previous_scene_name()
+
+end
+
+
+function update_previous_scene_name()
+    
     local previous_scene = obs.obs_frontend_get_current_scene()
 
     if previous_scene then
@@ -203,10 +315,18 @@ function on_transition_start(_)
     local current_trannsition = obs.obs_frontend_get_current_transition()
     local current_trannsition_name = obs.obs_source_get_name(current_trannsition)
 
+    -- トランジションに対応したフェード時間を取得
+    current_fade_duration = fade_duration_table[current_trannsition_name]
+
+    if current_fade_duration == nil then
+        current_fade_duration = 0
+    end
+
     -- メモリを解放
     obs.obs_source_release(current_trannsition)
 
     print("トランジション: " .. previous_scene_name .. " -> " .. current_scene_name .. "(" .. current_trannsition_name .. ")")
+    print("現在のフェード時間: " .. current_fade_duration .. "ms")
 
     -- 各々のオーディオメディアのリストを取得
     local previous_audio_list = get_audio_list(previous_scene_name)
@@ -260,6 +380,20 @@ function on_transition_stop(_)
         obs.obs_source_release(audio)
     end
 
+    all_audio_list = {}
+
+end
+
+
+-- フロントエンドイベントを検知する関数
+function on_event(event)
+
+    if event == obs.OBS_FRONTEND_EVENT_FINISHED_LOADING then
+        print("-----OBS_FRONTEND_EVENT_FINISHED_LOADING-----")
+        -- 初期化処理
+        init()
+    end
+
 end
 
 
@@ -298,7 +432,7 @@ function get_audio_list(scene_name)
         obs.obs_scene_release(scene)
         return media_sources
     end
-
+    
     for _, scene_item in ipairs(scene_items) do
 
         local source = obs.obs_sceneitem_get_source(scene_item)
@@ -350,7 +484,7 @@ function start_fade_out()
             end
 
             -- フェードアウトのステップを保存
-            local fade_out_step = target_volume / (fade_duration / FADE_UNIT)
+            local fade_out_step = target_volume / (current_fade_duration / FADE_UNIT)
             fade_out.step_list[audio_name] = fade_out_step
 
         else
@@ -445,7 +579,7 @@ function start_fade_in()
             end
 
             -- フェードインのステップを保存
-            local fade_in_step = target_volume / (fade_duration / FADE_UNIT)
+            local fade_in_step = target_volume / (current_fade_duration / FADE_UNIT)
             fade_in.step_list[audio_name] = fade_in_step
 
             -- その後音量を0にしておく
