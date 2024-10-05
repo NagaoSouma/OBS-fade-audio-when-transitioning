@@ -53,7 +53,6 @@ local transition_name_list = {}
 local signal_handler_list = {}
 
 -- グローバルなsettings
--- メモリリークが心配
 local global_settings = nil
 
 
