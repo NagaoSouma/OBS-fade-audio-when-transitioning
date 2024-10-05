@@ -197,6 +197,8 @@ end
 
 function update_fade_duration_table(settings)
 
+    print("-----fade_duration_table-----")
+
     for _, transition_name in ipairs(transition_name_list) do
         fade_duration_table[transition_name] = obs.obs_data_get_int(
             settings,
@@ -204,7 +206,6 @@ function update_fade_duration_table(settings)
         )
     end
 
-    print("[fade_duration_table]")
     for transition_name, fade in pairs(fade_duration_table) do
         print("  " .. transition_name .. ":" .. fade .. "ms")
     end
@@ -307,6 +308,8 @@ function on_transition_start(_)
     local current_scene_name = obs.obs_source_get_name(current_scene)
 
     if current_scene_name == previous_scene_name then
+        -- メモリを解放
+        obs.obs_source_release(current_scene)
         return
     end
 
