@@ -2,8 +2,7 @@
 
 OBSのトランジション時にオーディオのフェードアウトとフェードインをするためのスクリプトです。
 
-[ツール > スクリプト > +ボタン > fade_when_transitioning.luaを追加で使えます。]
-(https://github.com/NagaoSouma/OBS-fade-audio-when-transitioning/blob/main/fade_when_transitioning.lua)
+ツール > スクリプト > +ボタン > [fade_when_transitioning.lua](https://github.com/NagaoSouma/OBS-fade-audio-when-transitioning/blob/main/fade_when_transitioning.lua) を追加で使えます。
 
 トランジション毎にフェード時間を設定できます(初期値はそれぞれ0msなので注意)
 
