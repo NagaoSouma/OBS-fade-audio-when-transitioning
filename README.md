@@ -26,4 +26,4 @@ https://github.com/user-attachments/assets/f5d95ef9-959b-4c1a-a717-6216ad057dce
 > [!IMPORTANT]
 > 新しいトランジションを追加後、スクリプトをリロードするとリストに追加されます。
 
-<img width="794" alt="how_to_use1" src="https://github.com/user-attachments/assets/93e891a0-e7e8-42ee-a134-211f413b2f54">
+<img width="796" alt="how_to_use1" src="https://github.com/user-attachments/assets/05f04f53-2e42-4135-beb9-a4ea0432a226">
