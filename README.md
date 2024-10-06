@@ -4,7 +4,7 @@ OBSのトランジション時にオーディオのフェードアウトとフ�
 
 # 紹介動画
 
-https://github.com/user-attachments/assets/e8aa03d2-fd01-4be5-a0d1-5a0340655293
+https://github.com/user-attachments/assets/f5d95ef9-959b-4c1a-a717-6216ad057dce
 
 # ダウンロード方法
 
