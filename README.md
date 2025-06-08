@@ -13,9 +13,9 @@ https://github.com/user-attachments/assets/f5d95ef9-959b-4c1a-a717-6216ad057dce
 
 # ダウンロード方法
 
-[fade_when_transitioning.lua](https://github.com/NagaoSouma/OBS-fade-audio-when-transitioning/blob/main/fade_when_transitioning.lua)をダウンロード
+[fade_when_transitioning.lua](https://github.com/NagaoSouma/OBS-fade-audio-when-transitioning/blob/main/fade_when_transitioning.lua)
 
-リンクをクリックするだけです。
+上記のリンクをクリックするだけです。
 
 # 使い方
 
